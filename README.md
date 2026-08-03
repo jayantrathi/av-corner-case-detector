@@ -1,6 +1,6 @@
 # AV Corner-Case Detector
 
-Out-of-distribution detector for AV perception: flags driving scenes that look unusual relative to normal driving, since standard detectors don't know what they don't know — they're confident even when wrong on something they've never seen.
+Out-of-distribution detector for AV perception: flags driving scenes that look unusual relative to normal driving, since standard detectors cant understand what they don't know they're confident even when wrong on something they've never seen.
 
 ## Approach
 
@@ -39,4 +39,4 @@ python scripts/evaluate_rba_official_lost_and_found.py  # RbA, official checkpoi
 Single-camera only, offline evaluation (not closed-loop). RbA's localization gap is unresolved. LiDAR side is geometry-only, no detector yet.
 
 ---
-Jay Rathi — jayant12rathi@gmail.com
+Jayant Rathi — jayant12rathi@gmail.com
