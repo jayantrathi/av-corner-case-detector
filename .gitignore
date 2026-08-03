@@ -12,3 +12,17 @@ __pycache__/
 venv/
 ._*
 *.pt
+*.pth
+
+# Vendored third-party repos (Detectron2, official RbA) + their checkpoints --
+# 700MB+ of someone else's code/weights, not project code. setup_rba_official.sh
+# re-clones these on demand; nothing here is meant to live in this repo.
+external/RbA/
+external/detectron2/
+external/**/ckpts/
+output/
+
+# Redundant raw frame dumps -- the assembled GIFs in simple_demo/output/ are
+# the actual shareable artifact, the individual JPGs that built them aren't.
+simple_demo/output/frames/
+simple_demo/output/camera_lidar_frames/

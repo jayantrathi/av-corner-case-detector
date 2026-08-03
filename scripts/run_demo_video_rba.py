@@ -127,6 +127,10 @@ def main():
         hazard_mask = (mask == HAZARD_TRAIN_ID)
         if not hazard_mask.any():
             continue
+        # include_hood_box defaults True here deliberately: this script
+        # only ever scores Lost & Found footage (same fixed camera mount
+        # the hood box was calibrated against), unlike run_demo_coda_rba.py
+        # which scores different footage and must pass False.
         region_mask, _ = largest_region_from_peak(rba_map)
         if (region_mask & hazard_mask).any():
             hit_candidates.append((path, scene, region_mask))

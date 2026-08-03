@@ -96,7 +96,14 @@ def main():
 
         img = Image.open(img_path).convert("RGB")
         rba_map, _ = scorer.score(img, out_size=CANVAS_SIZE)
-        region_mask, peak_idx = largest_region_from_peak(rba_map, REGION_TOP_PERCENTILE)
+        # include_hood_box=False: that exclusion is calibrated to exactly
+        # where LOST & FOUND's specific camera mount puts the ego hood on
+        # screen. CODA is different footage, different vehicle, different
+        # camera position -- reusing that box here would silently discard
+        # real CODA image content for no reason. The general border margin
+        # (edge boundary/receptive-field effect) still applies, since
+        # that's a property of the model, not of Lost & Found specifically.
+        region_mask, peak_idx = largest_region_from_peak(rba_map, REGION_TOP_PERCENTILE, include_hood_box=False)
 
         out_path = OUT_DIR / f"hazard_{meta['file_name']}"
         render_rba_alert(img_path, region_mask, out_path)

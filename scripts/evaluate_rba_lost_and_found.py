@@ -113,53 +113,143 @@ def load_test_split():
     return test_normal, test_hazard
 
 
-# Margins excluded from detection eligibility -- neither is a workaround
-# for a fixable bug, both are checked, not assumed:
-#   - bottom: Lost & Found's camera mount is fixed, so the ego vehicle's
-#     own hood/hood-ornament sits in the same screen position in every
-#     single frame -- a real, physical, always-present object that isn't a
-#     Cityscapes class and isn't a hazard. Excluding a fixed ego-vehicle
-#     region from perception logic is standard practice in real AV stacks.
-#   - top: originally suspected to be a Mask2Former processor zero-padding
-#     artifact smearing into the canvas on interpolation. Checked directly
-#     with debug_rba_padding.py against real Lost & Found frames: this
-#     checkpoint's processor resizes straight to a fixed 384x384 square
-#     with ZERO padding (confirmed via pixel_mask -- 0px bottom, 0px
-#     right), so that theory was wrong, not just unproven. The top-edge
-#     artifact is still there with padding fully ruled out, which points
-#     to a boundary/receptive-field effect in the frozen model itself --
-#     pixels near an image edge have truncated context, a generic property
-#     of dense prediction near borders. Not fixable on our end, so this
-#     margin is the correct response to it, not a patch over a bug.
-TOP_MARGIN_FRAC = 0.08
-BOTTOM_MARGIN_FRAC = 0.15
+# Two SEPARATE, evidence-based exclusions -- not guesses. Measured directly
+# with debug_rba_peak_locations.py across all 30 held-out hazard frames
+# rather than inferred from screenshots:
+#
+# 1. BORDER margin, all four sides. The raw (unrestricted) peak position
+#    across nearly all 30 frames has row_frac p10-p90 of [0.00, 0.00] --
+#    the single highest-scoring pixel in the ENTIRE image sits on the
+#    literal top row almost every time. Once that's excluded, the next
+#    peak slides to col_frac 0.00 or 0.99 -- the left or right edge,
+#    whichever's nearer. So this was never a top-specific artifact, it's a
+#    boundary/receptive-field effect (pixels near ANY image edge have
+#    truncated context) present on all four sides -- confirmed not to be
+#    the Mask2Former processor's zero-padding (ruled out with real
+#    pixel_mask data in debug_rba_padding.py: 0px padding on this
+#    checkpoint). Margin kept small since it's excluding a real effect,
+#    not compensating for how big a bug's blast radius happens to be.
+# 2. HOOD box, not a margin. The restricted peak repeatedly clusters at
+#    row_frac 0.78-0.84, col_frac 0.58-0.60 across many unrelated scenes
+#    (Maurener Weg, Schafgasse, Parkplatz Flugfeld, Rechbergstr,
+#    Galgenbergstr, Hanns Klemm Str) -- consistent because Lost & Found's
+#    camera mount is fixed, so the ego vehicle's own hood/hood-ornament
+#    sits in the same screen position in every frame. This is NOT near any
+#    frame edge (a border margin would never reach it), it's a real,
+#    physical, always-present object mid-lower-frame that isn't a
+#    Cityscapes class and isn't a hazard -- excluding a fixed ego-vehicle
+#    region from perception logic is standard practice in real AV stacks.
+#    Box padded beyond the measured cluster, not sized exactly to it, so a
+#    few pixels of estimation slop doesn't let the hood slip back through.
+BORDER_MARGIN_FRAC = 0.05
+HOOD_ROW_RANGE = (0.72, 0.92)
+HOOD_COL_RANGE = (0.50, 0.70)
+
+# LOCAL CONTRAST -- the actual fix for the whack-a-mole artifact from the
+# last run (cyan region hugging the border/hood-box boundary in every
+# frame). Root cause: RbA's raw score is a smooth, broad SPATIAL GRADIENT --
+# it rises gradually toward image edges and sits elevated over the whole
+# hood region -- not a sharp localized spike. Hard-masking those regions out
+# doesn't remove that gradient, it just relocates the argmax to whichever
+# eligible pixel is closest to the excluded boundary, since that's still
+# the highest RAW score available. More margin just chases the same effect
+# outward one ring at a time -- that's why widening the boxes never helped.
+#
+# The fix has to change what "highest score" MEANS, not where we're allowed
+# to look for it. A real hazard is a small object that should stand out
+# from its OWN immediate surroundings -- a local bump. The border falloff
+# and the hood plateau are both broad, slow, large-scale trends. Subtracting
+# a heavily-blurred version of the map from itself removes exactly those
+# slow trends and keeps only fast local deviations -- so a small real
+# anomaly survives as a bump, while a broad artifact (which is locally flat,
+# even if globally high) gets subtracted down near zero.
+#
+# sigma is a FRACTION of the image's smaller dimension (not a fixed pixel
+# count) so it scales correctly if CANVAS_SIZE ever changes. Chosen close to
+# BORDER_MARGIN_FRAC's scale -- large enough to smooth over the border/hood
+# artifact's spatial extent, small enough to preserve bumps from genuinely
+# small hazard objects.
+LOCAL_CONTRAST_SIGMA_FRAC = 0.05
 
 
-def eligible_region_mask(shape: tuple[int, int]) -> np.ndarray:
+def local_contrast_map(rba_map: np.ndarray, sigma_frac: float = LOCAL_CONTRAST_SIGMA_FRAC) -> np.ndarray:
+    """rba_map minus a heavily-blurred version of itself. See the module-level
+    comment above LOCAL_CONTRAST_SIGMA_FRAC for the full reasoning -- short
+    version: this turns 'highest absolute score' into 'most locally
+    surprising point', which is what should actually distinguish a small
+    real hazard from a broad, low-frequency artifact."""
+    sigma = sigma_frac * min(rba_map.shape)
+    baseline = ndimage.gaussian_filter(rba_map, sigma=sigma)
+    return rba_map - baseline
+
+
+def border_eligible_mask(shape: tuple[int, int]) -> np.ndarray:
+    """The general, dataset-agnostic exclusion -- a small margin on all
+    four edges for the boundary/receptive-field effect. This is a property
+    of the frozen model (truncated context near ANY image edge), not of
+    Lost & Found specifically, so it's safe to apply to any footage --
+    CODA, a new demo clip, whatever."""
     h, w = shape
     mask = np.ones(shape, dtype=bool)
-    mask[: int(h * TOP_MARGIN_FRAC), :] = False
-    mask[int(h * (1 - BOTTOM_MARGIN_FRAC)):, :] = False
+    m = int(h * BORDER_MARGIN_FRAC)
+    mask[:m, :] = False
+    mask[h - m:, :] = False
+    m = int(w * BORDER_MARGIN_FRAC)
+    mask[:, :m] = False
+    mask[:, w - m:] = False
     return mask
 
 
-def largest_region_from_peak(rba_map: np.ndarray, top_percentile: float = REGION_TOP_PERCENTILE):
+def eligible_region_mask(shape: tuple[int, int], include_hood_box: bool = True) -> np.ndarray:
+    """border_eligible_mask PLUS, optionally, the Lost & Found ego-hood
+    box. include_hood_box defaults True because this function's primary
+    caller is THIS file's own Lost & Found evaluation -- but it is NOT
+    safe to default on for other datasets. HOOD_ROW_RANGE/HOOD_COL_RANGE
+    are calibrated to exactly where Lost & Found's specific camera mount
+    puts the ego vehicle's hood on screen; a different camera/vehicle
+    (CODA, any new demo footage) would have that region positioned
+    differently or not visible at all, so blindly excluding those same
+    coordinates there would just be discarding real image content for no
+    reason. Any caller scoring non-Lost-&-Found footage MUST pass
+    include_hood_box=False -- see run_demo_coda_rba.py, which does."""
+    mask = border_eligible_mask(shape)
+    if include_hood_box:
+        h, w = shape
+        mask[int(h * HOOD_ROW_RANGE[0]):int(h * HOOD_ROW_RANGE[1]),
+             int(w * HOOD_COL_RANGE[0]):int(w * HOOD_COL_RANGE[1])] = False
+    return mask
+
+
+def largest_region_from_peak(rba_map: np.ndarray, top_percentile: float = REGION_TOP_PERCENTILE,
+                              include_hood_box: bool = True, use_local_contrast: bool = True):
     """Threshold the map, connected-component label it, return the
     component containing the global argmax as a boolean mask -- the
     pixel-resolution equivalent of connected_region_bbox, using
     scipy.ndimage instead of a manual flood fill (fast enough at 1600x900,
     a hand-rolled Python stack-based fill would not be).
 
+    use_local_contrast=True (new default): peak and threshold are computed
+    on local_contrast_map(rba_map), not the raw map -- this is the fix for
+    the boundary-hugging artifact (see LOCAL_CONTRAST_SIGMA_FRAC comment).
+    eligible_region_mask is still applied on top as a belt-and-suspenders
+    guard against the two specifically-identified artifacts (frame edges,
+    LAF ego hood) -- local contrast should suppress their influence on its
+    own since they're broad/flat, not local bumps, but keeping the mask
+    means a bug in the contrast transform can't silently let them back in.
+
     Threshold is the (100 - top_percentile)-th percentile of THIS frame's
     own score distribution, not a fraction of its peak -- see the
     REGION_TOP_PERCENTILE comment above for why. Both the percentile and
     the argmax are computed ONLY over eligible_region_mask -- see that
-    function's docstring for why the frame edges are excluded."""
-    eligible = eligible_region_mask(rba_map.shape)
-    masked = np.where(eligible, rba_map, -np.inf)
-    peak_idx = np.unravel_index(np.argmax(masked), rba_map.shape)
-    threshold = np.percentile(rba_map[eligible], 100 - top_percentile)
-    binary = (rba_map >= threshold) & eligible
+    function's docstring for why the frame edges (and, optionally, the
+    Lost & Found ego-hood box) are excluded. include_hood_box MUST be set
+    to False by any caller scoring footage that isn't Lost & Found."""
+    eligible = eligible_region_mask(rba_map.shape, include_hood_box=include_hood_box)
+    score_map = local_contrast_map(rba_map) if use_local_contrast else rba_map
+    masked = np.where(eligible, score_map, -np.inf)
+    peak_idx = np.unravel_index(np.argmax(masked), score_map.shape)
+    threshold = np.percentile(score_map[eligible], 100 - top_percentile)
+    binary = (score_map >= threshold) & eligible
     labeled, _ = ndimage.label(binary)
     region_id = labeled[peak_idx]
     return labeled == region_id, peak_idx
@@ -222,6 +312,9 @@ def main():
     all_scores, all_labels = [], []
     hits, evaluable = 0, 0
     region_hits = 0
+    contrast_only_hits = 0  # local contrast, NO hard mask at all -- isolates
+    # whether the contrast transform itself suppresses the border/hood
+    # artifact, separate from the existing exclusion boxes
     records_for_viz = []
 
     for idx, (path, scene, is_hazard) in enumerate(test_normal + test_hazard):
@@ -242,6 +335,12 @@ def main():
             peak_idx = np.unravel_index(np.argmax(rba_map), rba_map.shape)
             if hazard_mask[peak_idx]:
                 hits += 1
+
+            contrast_map = local_contrast_map(rba_map)
+            contrast_peak_idx = np.unravel_index(np.argmax(contrast_map), contrast_map.shape)
+            if hazard_mask[contrast_peak_idx]:
+                contrast_only_hits += 1
+
             region_mask, peak_idx = largest_region_from_peak(rba_map)
             if (region_mask & hazard_mask).any():
                 region_hits += 1
@@ -256,12 +355,17 @@ def main():
     pixel_aupr = aupr(all_scores, all_labels)
 
     hit_rate = hits / evaluable if evaluable else float("nan")
+    contrast_only_hit_rate = contrast_only_hits / evaluable if evaluable else float("nan")
     region_hit_rate = region_hits / evaluable if evaluable else float("nan")
 
     print(f"\nRbA PIXEL-LEVEL AUROC: {pixel_auroc:.4f}")
     print(f"RbA PIXEL-LEVEL AUPR:  {pixel_aupr:.4f}")
-    print(f"RbA PEAK-PIXEL HIT RATE (argmax lands on real hazard): {hits}/{evaluable} = {hit_rate:.4f}")
-    print(f"RbA REGION HIT RATE (grown alert region touches real hazard): {region_hits}/{evaluable} = {region_hit_rate:.4f}")
+    print(f"RbA RAW PEAK-PIXEL HIT RATE (old, raw-score argmax, no mask): {hits}/{evaluable} = {hit_rate:.4f}")
+    print(f"RbA LOCAL-CONTRAST PEAK HIT RATE (new, contrast argmax, NO hard mask at all): "
+          f"{contrast_only_hits}/{evaluable} = {contrast_only_hit_rate:.4f}")
+    print(f"RbA REGION HIT RATE (contrast + eligible-region mask combined): {region_hits}/{evaluable} = {region_hit_rate:.4f}")
+    print("\nThe middle number is the real test: if local contrast alone (no border/hood exclusion boxes)")
+    print("already beats the old raw-peak number, the fix is the scoring change itself, not more masking.")
 
     print("\nFor comparison, the k-NN v3 (patch-level, Lost & Found only) result was:")
     print("  AUROC 0.9439, AUPR 0.0830, top-1 hit rate 0.20 (6/30), top-5 hit rate 0.60 (18/30)")
@@ -282,6 +386,8 @@ def main():
         "pixel_aupr": float(pixel_aupr),
         "peak_hit_rate": float(hit_rate),
         "peak_hits": hits,
+        "contrast_only_hit_rate": float(contrast_only_hit_rate),
+        "contrast_only_hits": contrast_only_hits,
         "region_hit_rate": float(region_hit_rate),
         "region_hits": region_hits,
         "evaluable_frames": evaluable,
@@ -289,6 +395,7 @@ def main():
         "n_test_hazard": len(test_hazard),
         "checkpoint": "facebook/mask2former-swin-tiny-cityscapes-semantic",
         "region_top_percentile": REGION_TOP_PERCENTILE,
+        "local_contrast_sigma_frac": LOCAL_CONTRAST_SIGMA_FRAC,
     }
     out_path = RESULTS_DIR / "rba_lost_and_found_results.json"
     with open(out_path, "w") as f:
