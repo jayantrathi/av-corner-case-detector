@@ -26,3 +26,8 @@ output/
 # the actual shareable artifact, the individual JPGs that built them aren't.
 simple_demo/output/frames/
 simple_demo/output/camera_lidar_frames/
+
+# ...but DO commit the curated README images
+!docs/
+!docs/images/
+!docs/images/*.jpg
