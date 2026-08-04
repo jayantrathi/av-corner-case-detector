@@ -1,29 +1,19 @@
-"""Train an anomaly-segmentation network on Apple-Silicon (MPS).
+"""Train an anomaly-segmentation network on Apple Silicon (MPS).
 
-Model : DeepLabV3 + ResNet-50 (ImageNet-pretrained backbone), 19 Cityscapes
-        classes. We train the whole thing on Cityscapes; the ImageNet backbone
-        is just a standard starting point (nobody trains segmentation from
-        random init) -- the segmentation + anomaly behaviour is learned here.
+Model: DeepLabV3 + ResNet-50 (ImageNet-pretrained backbone), 19 Cityscapes
+classes. Trained on Cityscapes; the segmentation and anomaly behaviour is
+learned here.
 
-Loss  : two parts, on disjoint pixels.
-   (1) INLIER   -- cross-entropy on the 19 known Cityscapes classes. Confident,
-                   correct predictions make one class-logit saturate positive,
-                   which drives the RbA anomaly score DOWN on normal pixels.
-   (2) OUTLIER  -- on pasted unknown-object pixels we minimize
-                   sum_c tanh(logit_c). That pushes every class logit negative
-                   (the model becomes un-confident about all known classes),
-                   which drives the RbA score UP. This is "outlier exposure",
-                   and it optimizes the EXACT quantity we score at inference:
-                       anomaly = -sum_c tanh(logit_c).
+Loss, on disjoint pixels:
+  (1) inlier  -- cross-entropy on the 19 known classes. Confident correct
+      predictions drive the anomaly score down on normal pixels.
+  (2) outlier -- on pasted unknown-object pixels, minimize sum_c tanh(logit_c),
+      pushing all class logits negative and the anomaly score up. This is
+      outlier exposure, and it optimizes the exact inference-time quantity:
+          anomaly = -sum_c tanh(logit_c).
 
-Why this is honest / interview-strong:
-   - We evaluate on Lost & Found, a different dataset never seen in training.
-   - Outlier crops are CODA-derived, also disjoint from the eval set.
-   - Cityscapes val monitors mIoU; Lost & Found is touched once, at the end.
-
-Run (overnight is fine):
-   PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/train_ood_segmenter.py \
-       --epochs 50 --batch-size 4 --crop 512
+    PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/train_ood_segmenter.py \
+        --epochs 50 --batch-size 4 --crop 512
 Checkpoints land in checkpoints/ood_segmenter/. Safe to stop and --resume.
 """
 from __future__ import annotations
@@ -64,7 +54,7 @@ def build_model() -> torch.nn.Module:
     from torchvision.models.segmentation import deeplabv3_resnet50
 
     # weights=None (train the seg heads), but load the ImageNet-pretrained
-    # backbone -- the standard, honest starting point.
+    # backbone -- the standard starting point.
     model = deeplabv3_resnet50(
         weights=None, weights_backbone="IMAGENET1K_V2",
         num_classes=NUM_CLASSES, aux_loss=True,

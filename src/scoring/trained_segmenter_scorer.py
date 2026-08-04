@@ -1,14 +1,11 @@
-"""Anomaly scorer around OUR OWN trained DeepLabV3 model.
+"""Anomaly scorer around the trained DeepLabV3 model.
 
-Drop-in replacement for external/rba_official_scorer.py's OfficialRbAScorer:
-same score(img, out_size) -> (rba_map, logits) interface, so the entire
-Lost & Found road-ROI evaluation harness runs unchanged -- the only thing that
-changes is that the weights are ours, trained on the user's MacBook, instead of
-the paper authors' downloaded checkpoint.
+Same score(img, out_size) -> (rba_map, logits) interface as
+external/rba_official_scorer.py, so the evaluation harness runs unchanged with
+the trained weights in place of the downloaded checkpoint.
 
-Anomaly score is identical to the RbA formula we trained against:
+Anomaly score matches the training objective:
     anomaly = -sum_c tanh(logit_c)
-so training and inference optimize/measure the exact same quantity.
 """
 from __future__ import annotations
 

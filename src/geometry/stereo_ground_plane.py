@@ -1,24 +1,18 @@
-"""REAL-STEREO ground-plane height for depth-gated anomaly detection.
+"""Stereo ground-plane height for depth-gated anomaly detection.
 
-No pretrained depth model here. Lost & Found was recorded with a calibrated
-stereo rig (the same Daimler setup as Cityscapes), so depth comes straight from
-sensor geometry:
+Uses Lost & Found's real stereo disparity instead of a monocular depth model.
+The dataset was recorded with a calibrated stereo rig (the same Daimler setup
+as Cityscapes), so depth comes from sensor geometry:
 
     depth = focal_length * baseline / disparity
 
-We decode the dataset's disparity map, back-project pixels to 3D with the rig's
-known calibration, fit the road plane by RANSAC over the segmenter's
-PREDICTED-road pixels, and measure each pixel's height above that plane. The
-depth is real geometry; the plane fit + height gate are our own math. That's
-the whole point of switching off the monocular model: the "just a pretrained
-model" critique no longer applies.
+Decodes the disparity map, back-projects to 3D with the rig's calibration,
+RANSAC-fits the road plane over predicted-road pixels, and measures height
+above it.
 
-IMPORTANT: the disparity PNG encoding is ASSUMED to follow the Cityscapes
-convention below and MUST be verified against a real file (run this module's
-__main__ once you have the disparity data). Do not trust it blind.
-    Cityscapes/L&F convention:
-        p == 0            -> invalid / no disparity
-        p  > 0            -> disparity = (p - 1) / 256.0   (pixels)
+The disparity PNG encoding is assumed to follow the Cityscapes convention and
+should be verified against a real file (run this module's __main__):
+    p == 0 -> invalid;  p > 0 -> disparity = (p - 1) / 256.0 pixels
 """
 from __future__ import annotations
 

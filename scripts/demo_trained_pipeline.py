@@ -1,19 +1,12 @@
 """Demo visuals for the trained anomaly segmenter + depth-gating.
 
-For each held-out Lost & Found hazard frame it renders a 3-panel strip:
-   [ original ] [ appearance anomaly ] [ depth-gated + alerts ]
-so you can SEE the whole story in one image:
-  - the raw model fires on the real hazard AND on some coplanar road paint,
-  - the geometric gate suppresses the flat false positives,
-  - red boxes mark the surviving alerts, green outlines the ground-truth hazard.
+For each held-out Lost & Found hazard frame, renders a 3-panel strip:
+    [ input ] [ appearance anomaly ] [ depth-gated + alert boxes ]
+The raw model fires on the hazard and on some flat road paint; the gate
+suppresses the flat false positives; red boxes mark the surviving alerts and
+green outlines the ground-truth hazard. Also builds a contact sheet and a GIF.
 
-Also builds a contact sheet and an animated GIF for the README.
-
-Everything here uses YOUR trained checkpoint and YOUR depth-gating -- no
-downloaded anomaly model.
-
-    PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/demo_trained_pipeline.py \
-        --checkpoint checkpoints/ood_segmenter/best.pt --n 10
+    PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/demo_trained_pipeline.py --n 10
 """
 from __future__ import annotations
 
@@ -30,10 +23,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, "/Volumes/BIggen/AV/external")
 sys.path.insert(0, "/Volumes/BIggen/AV/external/RbA")
 
-from evaluate_patch_localization import (
-    RESULTS_DIR, HAZARD_TRAIN_ID, CANVAS_SIZE, img_path_to_label_path, load_mask_resized,
+from src.data.lost_and_found import (
+    RESULTS_DIR, HAZARD_TRAIN_ID, CANVAS_SIZE,
+    img_path_to_label_path, load_mask_resized, load_test_split,
 )
-from evaluate_rba_lost_and_found import load_test_split
 from evaluate_depth_gated import predicted_road, gate_scores
 from src.scoring.trained_segmenter_scorer import TrainedSegmenterScorer
 from src.geometry.depth_ground_plane import GroundPlaneHeight
@@ -177,7 +170,7 @@ def main():
             return im.resize((PANEL_W, int(PANEL_W * H / W)))
         p1c = caption(rs(p1), "input  (green = true hazard)")
         p2c = caption(rs(p2), "appearance anomaly (raw model)")
-        p3c = caption(rs(p3), "depth-gated + alerts (ours)")
+        p3c = caption(rs(p3), "depth-gated + alert boxes")
         strip = Image.new("RGB", (p1c.width * 3 + 16, p1c.height), (18, 18, 18))
         strip.paste(p1c, (0, 0)); strip.paste(p2c, (p1c.width + 8, 0)); strip.paste(p3c, (2 * p1c.width + 16, 0))
         out = OUT_DIR / f"demo_{idx:02d}_{scene}.jpg"

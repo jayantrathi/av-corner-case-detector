@@ -1,15 +1,7 @@
-"""Evaluate OUR trained DeepLabV3 anomaly segmenter on the held-out Lost & Found
-test split, using the exact same road-ROI protocol as evaluate_rba_roi_standard.py.
-
-This is the payoff script: same rigorous evaluation that validated the downloaded
-checkpoint, now run on weights we trained ourselves on an M-series MacBook. The
-numbers here are directly comparable to the official-checkpoint baseline.
-
-Protocol (standard road-anomaly benchmark, no leakage):
-  positives = hazard pixels (trainId 2)
-  negatives = drivable-road pixels (trainId 1)
-  everything else (sky/border/ego) excluded from the ROI
-Test frames come from load_test_split() -- scene-level held-out, never trained on.
+"""Evaluate the trained DeepLabV3 anomaly segmenter on held-out Lost & Found,
+road-region protocol: positives = hazard pixels (trainId 2), negatives =
+drivable road (trainId 1), everything else excluded. Scene-level split, no
+leakage. Directly comparable to the downloaded-checkpoint baseline.
 """
 from __future__ import annotations
 
@@ -24,15 +16,12 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from evaluate_patch_localization import (
-    RESULTS_DIR, HAZARD_TRAIN_ID, CANVAS_SIZE,
-    img_path_to_label_path, load_mask_resized,
+from src.data.lost_and_found import (
+    RESULTS_DIR, HAZARD_TRAIN_ID, ROAD_TRAIN_ID, CANVAS_SIZE,
+    img_path_to_label_path, load_mask_resized, load_test_split,
 )
-from evaluate_rba_lost_and_found import load_test_split
 from src.eval.metrics import summarize
 from src.scoring.trained_segmenter_scorer import TrainedSegmenterScorer
-
-ROAD_TRAIN_ID = 1
 
 
 def main():
@@ -88,9 +77,9 @@ def main():
         print(f"{k:<10}{full[k]:>22.4f}{roi[k]:>22.4f}")
     print("=" * 62)
     print("\nReference points:")
-    print("  Official downloaded Swin-B checkpoint (our earlier run): ROI AUPR ~0.78, FPR95 ~0.29")
-    print("  RbA paper on Fishyscapes L&F:                            AP ~0.70, FPR95 ~0.06")
-    print("  ^ Our trained model above is directly comparable to these.")
+    print("  Downloaded Swin-B checkpoint: ROI AUPR ~0.78, FPR95 ~0.29")
+    print("  RbA paper on Fishyscapes L&F: AP ~0.70, FPR95 ~0.06")
+    print("  ^ The trained model above is directly comparable to these.")
 
     results = {"checkpoint": args.checkpoint, "full_frame": full, "roi_only": roi,
                "label_histogram": label_hist,

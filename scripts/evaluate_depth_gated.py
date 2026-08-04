@@ -1,22 +1,17 @@
-"""Stage-3 novel contribution: depth-gated anomaly detection, with ablation.
+"""Depth-gated anomaly detection, with ablation.
 
-Claim: appearance-only OOD scores false-fire on coplanar road markings /
-manholes. Penalizing the anomaly on near-in-plane pixels (low height above the
-fitted road plane) removes those false positives while keeping real,
-protruding obstacles -> better ROI AUPR / FPR95.
+Appearance-only anomaly scores false-fire on flat road markings and manholes.
+Penalizing the anomaly on near-coplanar pixels (low height above the fitted
+road plane) removes those false positives while keeping protruding obstacles,
+which improves ROI AUPR and FPR95.
 
-This script proves it, honestly:
-  - Loads an anomaly scorer (default: the official RbA checkpoint we already
-    have working, so the idea is validated BEFORE our trained model finishes;
-    pass --mode trained --checkpoint ... to run it on our own weights).
-  - Splits the held-out Lost & Found test frames BY SCENE into a tune half and
-    a report half (no scene in both -> no tuning-on-test leakage).
-  - Tunes the gate's (kappa, h0) on the tune scenes only.
-  - Reports, on the report scenes, ROI metrics for APPEARANCE-ONLY vs
-    DEPTH-GATED. The delta is the contribution.
+The held-out test frames are split by scene into tune/report (no scene in
+both); the gate (kappa, h0) is tuned on tune scenes and appearance-only vs
+depth-gated is reported on report scenes. The road mask for the plane fit
+comes from the segmenter's own argmax, never from labels.
 
-Road mask for the plane fit comes from the segmenter's OWN argmax (class 0 =
-road), never from labels. Labels are used only to grade.
+    --mode official   score with the downloaded RbA checkpoint
+    --mode trained    score with the trained DeepLabV3
 """
 from __future__ import annotations
 
@@ -34,16 +29,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, "/Volumes/BIggen/AV/external")
 sys.path.insert(0, "/Volumes/BIggen/AV/external/RbA")
 
-from evaluate_patch_localization import (
-    RESULTS_DIR, HAZARD_TRAIN_ID, CANVAS_SIZE,
-    img_path_to_label_path, load_mask_resized,
+from src.data.lost_and_found import (
+    RESULTS_DIR, HAZARD_TRAIN_ID, ROAD_TRAIN_ID, CANVAS_SIZE,
+    img_path_to_label_path, load_mask_resized, load_test_split,
 )
-from evaluate_rba_lost_and_found import load_test_split
 from src.eval.metrics import summarize, aupr, fpr_at_recall
 from src.geometry.depth_ground_plane import GroundPlaneHeight
 from src.geometry.stereo_ground_plane import StereoGroundPlaneHeight
 
-ROAD_TRAIN_ID = 1
 CITYSCAPES_ROAD_CLASS = 0
 
 
@@ -156,7 +149,7 @@ def main():
         return fpr_at_recall(scores, lab_r, 0.95)
 
     print("=" * 66)
-    print(f"{'metric':<12}{'appearance-only':>26}{'depth-gated (ours)':>26}")
+    print(f"{'metric':<12}{'appearance-only':>26}{'depth-gated':>26}")
     print("=" * 66)
     for k in ["AUPR", "AUROC", "FPR@95"]:
         arrow = ""

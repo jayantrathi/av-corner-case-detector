@@ -1,28 +1,16 @@
-"""Geometric ground-plane reasoning for anomaly detection.
+"""Ground-plane height estimation for depth-gated anomaly detection.
 
-The idea (this is the Stage-3 novel contribution):
-  Appearance-only anomaly detectors false-fire on flat road markings, manhole
-  covers, and painted arrows -- they LOOK unusual but they lie IN the road
-  plane. A real obstacle (tire, box, debris, lost cargo) physically STICKS UP
-  out of that plane. So if we estimate the road's 3D plane and measure each
-  pixel's height above it, we can suppress the "anomaly" on things that are
-  coplanar with the road while keeping it on things that protrude.
+Appearance-only anomaly detectors false-fire on flat road markings and manhole
+covers -- they look unusual but lie in the road plane, whereas a real obstacle
+protrudes from it. Estimating the road's 3D plane and each pixel's height above
+it separates the two: coplanar paint has height ~ 0, protruding obstacles do not.
 
 Pipeline:
-  1. Monocular depth from an off-the-shelf model (Depth Anything V2). This is a
-     MODULE, not our contribution -- the contribution is the fusion below.
-  2. Back-project pixels to 3D camera coordinates using an assumed pinhole
-     (focal length from a nominal horizontal FOV; principal point at center).
-  3. Fit the road plane by RANSAC over the PREDICTED-road pixels only (no label
-     peek -- the road mask comes from the segmenter's own argmax).
-  4. height(u,v) = |signed distance to that plane|, normalized by the median
-     road depth so it's robust to monocular depth's unknown global scale.
-
-Coplanar paint/manholes -> height ~ 0. Protruding obstacles -> height large.
-
-Note on honesty: monocular depth has no true metric scale, so we normalize by
-road depth and work with a *relative* height. That's enough to separate
-"in the plane" from "sticking out", which is all the gate needs.
+  1. Monocular depth from an off-the-shelf model (Depth Anything V2).
+  2. Back-project pixels to 3D with an assumed pinhole (focal from a nominal FOV).
+  3. RANSAC-fit the road plane over predicted-road pixels (no labels used).
+  4. height = |signed distance to the plane|, normalized by median road depth
+     to stay robust to monocular depth's unknown global scale.
 """
 from __future__ import annotations
 

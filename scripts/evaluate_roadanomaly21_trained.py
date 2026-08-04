@@ -1,15 +1,9 @@
-"""Stage-2 rigor: pixel-level RoadAnomaly21 eval for the RbA-style scorers
-(our trained DeepLabV3, or the official checkpoint baseline).
+"""Pixel-level RoadAnomaly21 evaluation for the RbA-style scorers (trained
+DeepLabV3 or the downloaded checkpoint baseline).
 
 Separate from evaluate_roadanomaly21.py (which scores the older kNN patch bank).
-Here we score dense pixel anomaly maps and evaluate at the pixel level, the
-standard SegmentMeIfYouCan protocol.
-
-Why this matters: a model that truly learned "unfamiliar object = anomaly"
-should transfer to a DIFFERENT dataset. RoadAnomaly21's anomalies appear
-anywhere in the frame (not just the road), so it's a harder generalization
-test than Lost & Found. If the trained model holds up here too, that's real
-evidence it learned the concept rather than overfitting one dataset.
+RoadAnomaly21's anomalies appear anywhere in the frame, not just the road, so
+it's a harder cross-dataset generalization test than Lost & Found.
 
 Labels (SegmentMeIfYouCan): 0 = in-distribution, 1 = anomaly, 255 = ignore.
     python scripts/evaluate_roadanomaly21_trained.py --mode trained
